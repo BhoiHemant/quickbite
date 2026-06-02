@@ -12,7 +12,7 @@ export const SetupWizard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
 
-  const { setHotel, currentUserId } = useRestaurantStore();
+  const { setHotel, setSetupCompleted, currentUserId } = useRestaurantStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,8 +40,15 @@ export const SetupWizard: React.FC = () => {
         numberOfTables
       );
 
+      // Create persistent settings configuration on Supabase
+      await api.createSettings(newHotel.id, currentUserId, {
+        tables_count: numberOfTables,
+        seeded_menu: true
+      });
+
       // Save to lightweight Zustand cache
       setHotel(newHotel);
+      setSetupCompleted(true);
       
       // Seed default menu items for a new hotel
       await api.createMenuItem(newHotel.id, 'Veg Hakka Noodles', 'Chinese', [

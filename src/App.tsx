@@ -15,7 +15,7 @@ import { BillingScreen } from './pages/BillingScreen';
 import { MenuScreen } from './pages/MenuScreen';
 import { TableSettingsScreen } from './pages/TableSettingsScreen';
 import { Diagnostics } from './pages/Diagnostics';
-import { StartupHealthCheck } from './components/StartupHealthCheck';
+import { DatabaseHealthCheck } from './components/DatabaseHealthCheck';
 
 // 1. Initialize TanStack Query Client
 const queryClient = new QueryClient({
@@ -31,7 +31,7 @@ const queryClient = new QueryClient({
 // 2. Protected Route Gate (Requires Auth AND completed Setup Wizard)
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
-  const { hotel } = useRestaurantStore();
+  const { hotel, setupCompleted } = useRestaurantStore();
 
   if (loading) {
     return (
@@ -48,7 +48,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" replace />;
   }
 
-  if (!hotel) {
+  if (!hotel || !setupCompleted) {
     return <Navigate to="/setup" replace />;
   }
 
@@ -58,7 +58,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 // 3. Wizard Route Gate (Requires Auth, but block if hotel already set up)
 const WizardRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
-  const { hotel } = useRestaurantStore();
+  const { hotel, setupCompleted } = useRestaurantStore();
 
   if (loading) {
     return (
@@ -75,7 +75,7 @@ const WizardRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (hotel) {
+  if (hotel && setupCompleted) {
     return <Navigate to="/" replace />;
   }
 
@@ -85,7 +85,7 @@ const WizardRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <StartupHealthCheck>
+      <DatabaseHealthCheck>
         <Router>
           <Routes>
             {/* Public Login Route */}
@@ -178,7 +178,7 @@ const App: React.FC = () => {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Router>
-      </StartupHealthCheck>
+      </DatabaseHealthCheck>
     </QueryClientProvider>
   );
 };

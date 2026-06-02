@@ -562,3 +562,37 @@ export const getTopSellingItems = async (
     .sort((a, b) => b.count - a.count)
     .slice(0, 4);
 };
+
+// ========================================================
+// 6. PERSISTENT SETTINGS API
+// ========================================================
+export const getSettingsByOwner = async (ownerId: string): Promise<any | null> => {
+  const { data, error } = await supabase
+    .from('settings')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+};
+
+export const createSettings = async (
+  hotelId: string,
+  ownerId: string,
+  restaurantConfig: any
+): Promise<any> => {
+  const { data, error } = await supabase
+    .from('settings')
+    .insert([{
+      hotel_id: hotelId,
+      owner_id: ownerId,
+      setup_completed: true,
+      restaurant_config: restaurantConfig
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};

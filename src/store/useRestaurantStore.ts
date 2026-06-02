@@ -2,15 +2,33 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Hotel, CartItem, MenuItem, MenuVariant } from '../types';
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  role: 'owner';
+}
+
 interface RestaurantState {
   hotel: Hotel | null;
   dineInCarts: { [tableId: string]: CartItem[] };
   parcelCart: CartItem[];
   currentUserId: string | null;
+  setupCompleted: boolean;
+  
+  // Global Auth State
+  user: AuthUser | null;
+  authLoading: boolean;
+  authError: string | null;
+  authInitialized: boolean;
   
   // Actions
   setHotel: (hotel: Hotel | null) => void;
   setUserId: (userId: string | null) => void;
+  setSetupCompleted: (setupCompleted: boolean) => void;
+  setUser: (user: AuthUser | null) => void;
+  setAuthLoading: (loading: boolean) => void;
+  setAuthError: (error: string | null) => void;
+  setAuthInitialized: (initialized: boolean) => void;
   clearAllData: () => void;
   
   // Transient Cart Actions
@@ -27,16 +45,33 @@ export const useRestaurantStore = create<RestaurantState>()(
       dineInCarts: {},
       parcelCart: [],
       currentUserId: null,
+      setupCompleted: false,
+
+      // Initial Auth States
+      user: null,
+      authLoading: true,
+      authError: null,
+      authInitialized: false,
 
       setHotel: (hotel) => set({ hotel }),
       setUserId: (currentUserId) => set({ currentUserId }),
+      setSetupCompleted: (setupCompleted) => set({ setupCompleted }),
+      setUser: (user) => set({ user }),
+      setAuthLoading: (authLoading) => set({ authLoading }),
+      setAuthError: (authError) => set({ authError }),
+      setAuthInitialized: (authInitialized) => set({ authInitialized }),
 
       clearAllData: () => {
         set({
           hotel: null,
           dineInCarts: {},
           parcelCart: [],
-          currentUserId: null
+          currentUserId: null,
+          setupCompleted: false,
+          user: null,
+          authLoading: false,
+          authError: null,
+          authInitialized: false
         });
       },
 
@@ -163,7 +198,8 @@ export const useRestaurantStore = create<RestaurantState>()(
         hotel: state.hotel,
         dineInCarts: state.dineInCarts,
         parcelCart: state.parcelCart,
-        currentUserId: state.currentUserId
+        currentUserId: state.currentUserId,
+        setupCompleted: state.setupCompleted
       })
     }
   )
