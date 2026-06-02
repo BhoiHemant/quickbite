@@ -125,9 +125,12 @@ export const Diagnostics: React.FC = () => {
       } else {
         // Fallback to active channel subscription
         const testChannel = supabase.channel('audit-test-channel');
+        let hasResolved = false;
         
         // Timeout gate of 15 seconds to accommodate network latency round-trips
         const timeoutId = setTimeout(() => {
+          if (hasResolved) return;
+          hasResolved = true;
           supabase.removeChannel(testChannel);
           initialTests[9] = { 
             name: 'Realtime websocket subscription active', 
@@ -138,7 +141,9 @@ export const Diagnostics: React.FC = () => {
         }, 15000);
 
         testChannel.subscribe((status) => {
+          if (hasResolved) return;
           if (status === 'SUBSCRIBED') {
+            hasResolved = true;
             clearTimeout(timeoutId);
             initialTests[9] = { 
               name: 'Realtime websocket subscription active', 
@@ -148,6 +153,7 @@ export const Diagnostics: React.FC = () => {
             setTests([...initialTests]);
             supabase.removeChannel(testChannel);
           } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+            hasResolved = true;
             clearTimeout(timeoutId);
             initialTests[9] = { 
               name: 'Realtime websocket subscription active', 

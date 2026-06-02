@@ -34,8 +34,12 @@ try {
   console.error('Migration check skipped:', err);
 }
 
+import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
