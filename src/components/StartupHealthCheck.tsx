@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
-  ShieldAlert, 
   RefreshCw, 
-  Key, 
-  XCircle, 
   X,
   AlertCircle,
   ArrowRight
@@ -26,10 +23,7 @@ interface Checkpoint {
 export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children }) => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const isConfigured = !!(envUrl && envKey && !envUrl.includes('placeholder-url') && !envKey.includes('placeholder-anon-key'));
 
-  // If variables are configured, do NOT block the screen; load the application immediately.
-  const [isBlocking, setIsBlocking] = useState(!isConfigured);
   const [showBanner, setShowBanner] = useState(false);
   const [bannerMessage, setBannerMessage] = useState('');
   const [isRetrying, setIsRetrying] = useState(false);
@@ -44,21 +38,21 @@ export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children
         name: 'Supabase URL Configuration',
         description: 'Verifying VITE_SUPABASE_URL environment variable.',
         status: 'pending',
-        resolution: 'Configure VITE_SUPABASE_URL in your deployment environments (Vercel Project Settings -> Environment Variables or local .env file).'
+        resolution: 'Configure VITE_SUPABASE_URL in Vercel settings.'
       },
       {
         id: 'supabase_key',
         name: 'Supabase Anon Key Configuration',
         description: 'Verifying VITE_SUPABASE_ANON_KEY environment variable.',
         status: 'pending',
-        resolution: 'Configure VITE_SUPABASE_ANON_KEY in your deployment environments (Vercel Settings -> Environment Variables or local .env file).'
+        resolution: 'Configure VITE_SUPABASE_ANON_KEY in Vercel settings.'
       },
       {
         id: 'supabase_connection',
         name: 'Supabase Server Connection',
         description: 'Testing connection reachability and mapping status response codes.',
         status: 'pending',
-        resolution: 'Check your network, or make sure your Supabase project instance URL is correct and the server has not been paused.'
+        resolution: 'Check your network, or make sure your Supabase project instance URL is correct.'
       },
       {
         id: 'database_access',
@@ -80,7 +74,8 @@ export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children
     if (!envUrl || envUrl.includes('placeholder-url') || envUrl.includes('your_supabase_project_url_here')) {
       initialCheckpoints[0].status = 'failed';
       initialCheckpoints[0].errorDetail = 'VITE_SUPABASE_URL is missing or set to placeholder value.';
-      setIsBlocking(true);
+      setBannerMessage('Supabase URL configuration is missing. Cloud database features are disabled.');
+      setShowBanner(true);
       setIsRetrying(false);
       return;
     }
@@ -90,7 +85,8 @@ export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children
     if (!envKey || envKey.includes('placeholder-anon-key') || envKey.includes('your_supabase_anon_key_here')) {
       initialCheckpoints[1].status = 'failed';
       initialCheckpoints[1].errorDetail = 'VITE_SUPABASE_ANON_KEY is missing or set to placeholder value.';
-      setIsBlocking(true);
+      setBannerMessage('Supabase Anon Key configuration is missing. Cloud database features are disabled.');
+      setShowBanner(true);
       setIsRetrying(false);
       return;
     }
@@ -191,104 +187,11 @@ export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children
   };
 
   useEffect(() => {
-    if (isConfigured) {
-      runBackgroundDiagnostics();
-    }
+    // Run background diagnostics on boot
+    runBackgroundDiagnostics();
   }, []);
 
-  // Blocking Flow: ONLY active when VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing entirely.
-  if (isBlocking) {
-    return (
-      <div className="min-h-screen min-h-svh bg-slate-950 text-slate-100 flex flex-col justify-center items-center px-6 py-12 select-none animate-in fade-in duration-200 text-left">
-        <div className="w-full max-w-xl space-y-6">
-          
-          {/* Header */}
-          <div className="flex items-center gap-3 border-b border-slate-900 pb-5">
-            <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl animate-pulse">
-              <ShieldAlert className="w-8 h-8" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black text-white uppercase tracking-wider">Configuration Missing</h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                QuickBite POS requires Supabase credentials to bootstrap.
-              </p>
-            </div>
-          </div>
-
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
-            <h2 className="text-sm font-bold text-white uppercase tracking-wide">
-              Supabase credentials not found at runtime
-            </h2>
-            <p className="text-xs text-slate-450 leading-relaxed font-semibold">
-              The application could not detect your database credentials. Please declare these key parameters inside your Vercel deployment variables or in your local <code className="text-amber-500">.env</code> configuration file.
-            </p>
-            
-            <div className="grid grid-cols-1 gap-2.5 pt-2">
-              <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-850">
-                <div className="flex items-center gap-2">
-                  <Key className="w-4 h-4 text-rose-500" />
-                  <span className="font-mono text-[10px] text-slate-400">VITE_SUPABASE_URL</span>
-                </div>
-                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-rose-400 bg-rose-950/20 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
-                  <XCircle className="w-3 h-3 text-rose-500" />
-                  <span>Missing</span>
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-850">
-                <div className="flex items-center gap-2">
-                  <Key className="w-4 h-4 text-rose-500" />
-                  <span className="font-mono text-[10px] text-slate-400">VITE_SUPABASE_ANON_KEY</span>
-                </div>
-                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-rose-400 bg-rose-950/20 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
-                  <XCircle className="w-3 h-3 text-rose-500" />
-                  <span>Missing</span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Vercel Setup Instruction Card */}
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-            <div className="flex gap-2 text-amber-500 font-black text-xs uppercase tracking-wider items-center">
-              <Key className="w-4 h-4 text-amber-500" />
-              <span>Vercel Environment Setup</span>
-            </div>
-            
-            <div className="space-y-1.5 p-3.5 bg-slate-950 border border-slate-850 rounded-xl font-mono text-[10px] text-slate-350 leading-relaxed font-semibold">
-              <div>1. Go to <strong className="text-white">Vercel Dashboard</strong> &rarr; Select your project</div>
-              <div>2. Navigate to <strong className="text-white">Settings</strong> &rarr; <strong className="text-white">Environment Variables</strong></div>
-              <div>3. Create two new variables:</div>
-              <div className="pl-4 pt-1 text-amber-500 font-bold">VITE_SUPABASE_URL = (your URL)</div>
-              <div className="pl-4 text-amber-500 font-bold">VITE_SUPABASE_ANON_KEY = (your public anon key)</div>
-              <div className="pt-1.5 text-slate-500 font-bold">4. Trigger a new deployment in Vercel to load changes.</div>
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => {
-                const refreshedUrl = import.meta.env.VITE_SUPABASE_URL;
-                const refreshedKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-                if (refreshedUrl && refreshedKey && !refreshedUrl.includes('placeholder-url')) {
-                  setIsBlocking(false);
-                  window.location.reload();
-                } else {
-                  alert('Supabase credentials still missing in environment. Please redeploy Vercel or configure your local .env file.');
-                }
-              }}
-              className="flex-1 h-12 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-slate-950 font-bold transition-all flex items-center justify-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4 animate-spin-reverse" />
-              <span>Re-check Environment Configuration</span>
-            </button>
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  // Non-blocking Flow: Render the router children immediately. Render a sticky warning banner at top if background diagnostic fails.
+  // 100% Non-blocking Flow: Always render the children routes instantly.
   return (
     <>
       {showBanner && (

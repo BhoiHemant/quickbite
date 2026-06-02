@@ -20,11 +20,20 @@ export const useAuth = () => {
     let isMounted = true;
     console.log('[Auth Debug] Initializing Auth State listener...');
 
+    // Safety release timeout to prevent loading lock if Supabase connection hangs
+    const safetyTimeout = setTimeout(() => {
+      if (isMounted) {
+        console.warn('[Auth Debug] Safety release timeout triggered. Releasing auth loader gate.');
+        setLoading(false);
+      }
+    }, 2500);
+
     // Single unified listener handles startup session check and state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log(`[Auth Debug] onAuthStateChange event triggered: ${event}`);
       if (!isMounted) return;
 
+      clearTimeout(safetyTimeout);
       setLoading(true);
       setError(null);
       
@@ -78,6 +87,7 @@ export const useAuth = () => {
 
     return () => {
       isMounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, [setHotel, setUserId, clearAllData]);
