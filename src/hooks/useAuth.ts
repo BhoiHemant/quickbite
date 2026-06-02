@@ -16,81 +16,88 @@ export const useAuth = () => {
 
   const { setHotel, setUserId, clearAllData } = useRestaurantStore();
 
-  useEffect(() => {
-    let isMounted = true;
-    console.log('[Auth Debug] Initializing Auth State listener...');
+    useEffect(() => {
+      let isMounted = true;
+      console.log('[Auth Debug] Initializing Auth State listener...');
 
-    // Safety release timeout to prevent loading lock if Supabase connection hangs
-    const safetyTimeout = setTimeout(() => {
-      if (isMounted) {
-        console.warn('[Auth Debug] Safety release timeout triggered. Releasing auth loader gate.');
-        setLoading(false);
-      }
-    }, 2500);
+      // Safety release timeout to prevent loading lock if Supabase connection hangs
+      const safetyTimeout = setTimeout(() => {
+        if (isMounted) {
+          console.warn('[Auth Debug] Safety release timeout triggered. Releasing auth loader gate.');
+          setLoading(false);
+        }
+      }, 2500);
 
-    // Single unified listener handles startup session check and state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log(`[Auth Debug] onAuthStateChange event triggered: ${event}`);
-      if (!isMounted) return;
+      // Single unified listener handles startup session check and state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log(`[Auth Debug] onAuthStateChange event triggered: ${event}`);
+        if (!isMounted) return;
 
-      clearTimeout(safetyTimeout);
-      setLoading(true);
-      setError(null);
-      
-      try {
-        if (session?.user) {
-          console.log('[Auth Debug] Active session found for user:', session.user.email);
-          const loggedUser: UserProfile = {
-            id: session.user.id,
-            email: session.user.email || '',
-            role: 'owner'
-          };
-          
-          if (isMounted) {
-            setUser(loggedUser);
-            setUserId(session.user.id);
-          }
+        setLoading(true);
+        setError(null);
+        
+        try {
+          if (session?.user) {
+            console.log('[Auth Debug] Active session found for user:', session.user.email);
+            const loggedUser: UserProfile = {
+              id: session.user.id,
+              email: session.user.email || '',
+              role: 'owner'
+            };
+            
+            if (isMounted) {
+              setUser(loggedUser);
+              setUserId(session.user.id);
+            }
 
-          // Fetch hotel configuration
-          console.log('[Database Fetch Debug] Restoring hotel state for owner:', session.user.id);
-          const hotel = await api.getHotelByOwner(session.user.id);
-          
-          if (isMounted) {
-            if (hotel) {
-              console.log('[Database Fetch Debug] Hotel config restored:', hotel.name);
-              setHotel(hotel);
-            } else {
-              console.log('[Database Fetch Debug] No hotel configuration found.');
+            // Fetch hotel configuration with a robust 2-second timeout to prevent database locks
+            console.log('[Database Fetch Debug] Restoring hotel state for owner:', session.user.id);
+            const hotel = await Promise.race([
+              api.getHotelByOwner(session.user.id),
+              new Promise<null>((resolve) => setTimeout(() => {
+                console.warn('[Database Fetch Debug] Hotel fetch timed out after 2000ms. Falling back.');
+                resolve(null);
+              }, 2000))
+            ]);
+            
+            if (isMounted) {
+              if (hotel) {
+                console.log('[Database Fetch Debug] Hotel config restored:', hotel.name);
+                setHotel(hotel);
+              } else {
+                console.log('[Database Fetch Debug] No hotel configuration found.');
+                setHotel(null);
+              }
+            }
+          } else {
+            console.log('[Auth Debug] No active session. Cleaning credentials...');
+            if (isMounted) {
+              setUser(null);
+              setUserId(null);
               setHotel(null);
             }
           }
-        } else {
-          console.log('[Auth Debug] No active session. Cleaning credentials...');
+        } catch (err: any) {
+          const errMsg = err?.message || err || 'Authentication error occurred';
+          console.error('[Auth Debug] Error in onAuthStateChange callback:', errMsg);
           if (isMounted) {
-            setUser(null);
-            setUserId(null);
-            setHotel(null);
+            setError(String(errMsg));
+          }
+        } finally {
+          if (isMounted) {
+            clearTimeout(safetyTimeout);
+            setLoading(false);
+            console.log('[Auth Debug] Auth initialization completed. Loading released.');
           }
         }
-      } catch (err: any) {
-        console.error('[Auth Debug] Error in onAuthStateChange callback:', err.message, err.stack);
-        if (isMounted) {
-          setError(err.message || 'Authentication error occurred');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-          console.log('[Auth Debug] Auth initialization completed. Loading released.');
-        }
-      }
-    });
+      });
 
-    return () => {
-      isMounted = false;
-      clearTimeout(safetyTimeout);
-      subscription.unsubscribe();
-    };
-  }, [setHotel, setUserId, clearAllData]);
+      return () => {
+        isMounted = false;
+        clearTimeout(safetyTimeout);
+        subscription.unsubscribe();
+      };
+    }, [setHotel, setUserId, clearAllData]);
 
   const login = async (email: string, password: string) => {
     setError(null);

@@ -115,33 +115,51 @@ export const createMenuItem = async (
   hotelId: string,
   name: string,
   category: string,
-  variantsList: { variant_name: string; price: number }[]
+  variantsList: { variant_name: string; price: number }[],
+  active: boolean = true
 ): Promise<MenuItem> => {
-  // 1. Insert base menu item
-  const { data: item, error: itemError } = await supabase
-    .from('menu_items')
-    .insert([{ hotel_id: hotelId, name, category, active: true }])
-    .select()
-    .single();
+  let createdItem: MenuItem | null = null;
+  
+  try {
+    // 1. Insert base menu item
+    const { data: item, error: itemError } = await supabase
+      .from('menu_items')
+      .insert([{ hotel_id: hotelId, name, category, active }])
+      .select()
+      .single();
 
-  if (itemError) throw itemError;
+    if (itemError) throw itemError;
+    createdItem = item;
 
-  // 2. Insert associated price variants
-  if (variantsList.length > 0) {
-    const variantInserts = variantsList.map(v => ({
-      menu_item_id: item.id,
-      variant_name: v.variant_name,
-      price: v.price
-    }));
+    // 2. Insert associated price variants
+    if (variantsList.length > 0) {
+      const variantInserts = variantsList.map(v => ({
+        menu_item_id: item.id,
+        variant_name: v.variant_name,
+        price: v.price
+      }));
 
-    const { error: varsError } = await supabase
-      .from('menu_variants')
-      .insert(variantInserts);
+      const { error: varsError } = await supabase
+        .from('menu_variants')
+        .insert(variantInserts);
 
-    if (varsError) throw varsError;
+      if (varsError) {
+        // Rollback: delete the newly created base menu item since variants failed
+        console.warn('[Database Transaction Rollback] Variants insertion failed, rolling back menu item creation:', varsError.message);
+        await supabase.from('menu_items').delete().eq('id', item.id);
+        throw varsError;
+      }
+    }
+
+    return item;
+  } catch (err: any) {
+    // If the base item was created but an unhandled exception occurred, ensure we clean it up
+    if (createdItem && createdItem.id) {
+      console.warn('[Database Transaction Rollback] Catch block cleanup triggered, deleting menu item:', createdItem.id);
+      await supabase.from('menu_items').delete().eq('id', createdItem.id);
+    }
+    throw err;
   }
-
-  return item;
 };
 
 export const updateMenuItem = async (

@@ -41,6 +41,8 @@ export const MenuScreen: React.FC = () => {
   ]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
   const invalidateMenu = () => {
     queryClient.invalidateQueries({ queryKey: ['menuItems', hotelId] });
@@ -68,6 +70,7 @@ export const MenuScreen: React.FC = () => {
     setIsActive(true);
     setEnableVariants(true);
     setFormVariants([{ variant_name: 'Full', price: 120 }, { variant_name: 'Half', price: 70 }]);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
@@ -76,6 +79,7 @@ export const MenuScreen: React.FC = () => {
     setName(item.name);
     setCategory(item.category);
     setIsActive(item.active);
+    setFormError(null);
     
     // Load variants from nested list
     const vars = item.menu_variants || [];
@@ -95,7 +99,25 @@ export const MenuScreen: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !category.trim() || formVariants.length === 0 || !hotelId) return;
+    setFormError(null);
+    
+    console.log('[Menu Audit Log] STEP 1: Form submit triggered');
+
+    if (!name.trim()) {
+      setFormError('Please enter an item name');
+      console.warn('[Menu Audit Log] Validation failed: Missing Item Name');
+      return;
+    }
+    if (!category.trim()) {
+      setFormError('Please enter a category name');
+      console.warn('[Menu Audit Log] Validation failed: Missing Category Name');
+      return;
+    }
+    if (!hotelId) {
+      setFormError('Configuration error: Missing hotel_id');
+      console.warn('[Menu Audit Log] Validation failed: Missing hotel_id');
+      return;
+    }
 
     // Filter out blank variants or NaN prices
     let validVariants = formVariants.filter(
@@ -107,26 +129,64 @@ export const MenuScreen: React.FC = () => {
       validVariants = [{ variant_name: 'Regular', price: formVariants[0]?.price || 0 }];
     }
 
-    if (validVariants.length === 0) return;
+    if (validVariants.length === 0) {
+      setFormError('Please configure at least one valid price variant');
+      console.warn('[Menu Audit Log] Validation failed: No valid variants configured');
+      return;
+    }
+
+    console.log('[Menu Audit Log] STEP 2: Validation passed');
+
+    const payload = {
+      hotel_id: hotelId,
+      name: name.trim(),
+      category: category.trim(),
+      active: isActive,
+      variants: validVariants
+    };
+    console.log('[Menu Audit Log] STEP 3: Payload generated:', JSON.stringify(payload, null, 2));
 
     setIsSubmitting(true);
     try {
       if (editingItem) {
-        // Update base item and sync variants on Supabase
+        console.log('[Menu Audit Log] STEP 4: Supabase update request sent for ID:', editingItem.id);
         await api.updateMenuItem(editingItem.id, {
           name: name.trim(),
           category: category.trim(),
           active: isActive
         }, validVariants);
+        console.log('[Menu Audit Log] STEP 5: Supabase response received (Update successful)');
       } else {
-        // Create new item and insert variants on Supabase
-        await api.createMenuItem(hotelId, name.trim(), category.trim(), validVariants);
+        console.log('[Menu Audit Log] STEP 4: Supabase insert request sent');
+        const newItem = await api.createMenuItem(hotelId, name.trim(), category.trim(), validVariants, isActive);
+        console.log('[Menu Audit Log] STEP 5: Supabase response received (Insert successful):', JSON.stringify(newItem, null, 2));
       }
 
+      console.log('[Menu Audit Log] STEP 6: React Query cache invalidated');
       invalidateMenu();
+
+      console.log('[Menu Audit Log] STEP 7: Menu list refreshed');
+      
+      // Show elegant success alert
+      setSuccessToast(editingItem ? '✅ Menu Item Updated Successfully' : '✅ Menu Item Created Successfully');
+      setTimeout(() => {
+        setSuccessToast(null);
+      }, 4000);
+
       setIsFormOpen(false);
-    } catch (err) {
-      console.error('Error saving menu item:', err);
+    } catch (err: any) {
+      console.error('[Menu Audit Log] Database execution failed:', err);
+      // Detailed human-friendly translation of database/Supabase errors
+      const errorMsg = err?.message || String(err);
+      if (errorMsg.includes('row-level security') || errorMsg.includes('42501')) {
+        setFormError('RLS policy blocked insert. Verify your owner registration status.');
+      } else if (errorMsg.includes('foreign key') || errorMsg.includes('23503')) {
+        setFormError('Database integrity violation: Missing hotel_id reference.');
+      } else if (errorMsg.includes('duplicate key') || errorMsg.includes('23505')) {
+        setFormError('A variant with this name already exists for this item.');
+      } else {
+        setFormError(`Database connection failed: ${errorMsg}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -179,6 +239,14 @@ export const MenuScreen: React.FC = () => {
 
   return (
     <MainLayout>
+      {/* Success Toast Notification Banner */}
+      {successToast && (
+        <div className="fixed top-4 right-4 z-[9999] bg-emerald-600 text-white font-bold text-xs py-3 px-5 rounded-2xl shadow-2xl flex items-center gap-2 border border-emerald-500 animate-in slide-in-from-top-4 duration-300">
+          <Check className="w-4 h-4 shrink-0 stroke-[3]" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
       <div className="space-y-4">
         
         {/* Screen Title & Add Button */}
@@ -339,6 +407,13 @@ export const MenuScreen: React.FC = () => {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4 text-left">
+                {/* Form Error Banner */}
+                {formError && (
+                  <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold leading-normal flex items-start gap-2 animate-in fade-in duration-200">
+                    <span className="shrink-0 font-extrabold text-[13px] leading-none">⚠️</span>
+                    <span>{formError}</span>
+                  </div>
+                )}
                 {/* Item Name */}
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
