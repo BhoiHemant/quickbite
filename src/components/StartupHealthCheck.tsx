@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { ShieldAlert, RefreshCw, AlertTriangle, FileText, Database, Key, Server, Lock, CheckCircle2, XCircle } from 'lucide-react';
+import { 
+  ShieldAlert, 
+  RefreshCw, 
+  Key, 
+  XCircle, 
+  X,
+  AlertCircle,
+  ArrowRight
+} from 'lucide-react';
 
 interface StartupHealthCheckProps {
   children: React.ReactNode;
@@ -16,309 +24,262 @@ interface Checkpoint {
 }
 
 export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children }) => {
-  const [loading, setLoading] = useState(true);
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
-  const [hasFailed, setHasFailed] = useState(false);
+  const envUrl = import.meta.env.VITE_SUPABASE_URL;
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const isConfigured = !!(envUrl && envKey && !envUrl.includes('placeholder-url') && !envKey.includes('placeholder-anon-key'));
 
-  const runDiagnostics = async () => {
-    setLoading(true);
-    setHasFailed(false);
-    console.log('[Diagnostic Startup] Running production readiness connection audit...');
+  // If variables are configured, do NOT block the screen; load the application immediately.
+  const [isBlocking, setIsBlocking] = useState(!isConfigured);
+  const [showBanner, setShowBanner] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState('');
+  const [isRetrying, setIsRetrying] = useState(false);
 
-    const envUrl = import.meta.env.VITE_SUPABASE_URL;
-    const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const runBackgroundDiagnostics = async () => {
+    setIsRetrying(true);
+    console.log('[Diagnostic Startup] Auditing Supabase reachability in background...');
 
     const initialCheckpoints: Checkpoint[] = [
       {
         id: 'supabase_url',
         name: 'Supabase URL Configuration',
-        description: 'Verifying if VITE_SUPABASE_URL environment variable is loaded.',
+        description: 'Verifying VITE_SUPABASE_URL environment variable.',
         status: 'pending',
         resolution: 'Configure VITE_SUPABASE_URL in your deployment environments (Vercel Project Settings -> Environment Variables or local .env file).'
       },
       {
         id: 'supabase_key',
         name: 'Supabase Anon Key Configuration',
-        description: 'Verifying if VITE_SUPABASE_ANON_KEY environment variable is loaded.',
+        description: 'Verifying VITE_SUPABASE_ANON_KEY environment variable.',
         status: 'pending',
-        resolution: 'Configure VITE_SUPABASE_ANON_KEY in your deployment environments (Vercel Project Settings -> Environment Variables or local .env file).'
+        resolution: 'Configure VITE_SUPABASE_ANON_KEY in your deployment environments (Vercel Settings -> Environment Variables or local .env file).'
       },
       {
         id: 'supabase_connection',
         name: 'Supabase Server Connection',
-        description: 'Testing connection reachability to your Supabase API endpoint.',
+        description: 'Testing connection reachability and mapping status response codes.',
         status: 'pending',
-        resolution: 'Check your internet connection, or make sure your Supabase project instance URL is correct and the server has not been paused by Supabase.'
+        resolution: 'Check your network, or make sure your Supabase project instance URL is correct and the server has not been paused.'
       },
       {
         id: 'database_access',
         name: 'Database Access (Tables)',
         description: 'Verifying permissions and schema layouts on core tables.',
         status: 'pending',
-        resolution: 'Database is reachable, but tables are missing or RLS is misconfigured. Execute your supabase_schema.sql migrations in your Supabase SQL Editor.'
+        resolution: 'Verify that database migrations have been executed in your Supabase SQL Editor.'
       },
       {
         id: 'auth_gate',
         name: 'Authentication Gate status',
         description: 'Validating Auth Gateway session and protocol handling.',
         status: 'pending',
-        resolution: 'Supabase Auth server failed to respond or returned an API error. Check if Auth is enabled and email provider configurations are correct.'
+        resolution: 'Supabase Auth server failed to respond. Check if Auth is enabled.'
       }
     ];
-
-    setCheckpoints(initialCheckpoints);
 
     // 1. Check Supabase URL
     if (!envUrl || envUrl.includes('placeholder-url') || envUrl.includes('your_supabase_project_url_here')) {
       initialCheckpoints[0].status = 'failed';
       initialCheckpoints[0].errorDetail = 'VITE_SUPABASE_URL is missing or set to placeholder value.';
-      setCheckpoints([...initialCheckpoints]);
-      setHasFailed(true);
-      setLoading(false);
+      setIsBlocking(true);
+      setIsRetrying(false);
       return;
     }
     initialCheckpoints[0].status = 'success';
-    setCheckpoints([...initialCheckpoints]);
 
     // 2. Check Supabase Anon Key
     if (!envKey || envKey.includes('placeholder-anon-key') || envKey.includes('your_supabase_anon_key_here')) {
       initialCheckpoints[1].status = 'failed';
       initialCheckpoints[1].errorDetail = 'VITE_SUPABASE_ANON_KEY is missing or set to placeholder value.';
-      setCheckpoints([...initialCheckpoints]);
-      setHasFailed(true);
-      setLoading(false);
+      setIsBlocking(true);
+      setIsRetrying(false);
       return;
     }
     initialCheckpoints[1].status = 'success';
-    setCheckpoints([...initialCheckpoints]);
 
-    // 3. Supabase Connection Check
+    // 3. Supabase Connection Check (with precise HTTP mapping)
+    let connErrorDetail = '';
     try {
-      console.log('[Diagnostic Startup] Attempting to reach Supabase API...');
+      console.log('[Diagnostic Startup] Hitting REST endpoint for HTTP status mapping...');
+      // Perform direct fetch to inspect HTTP status code
       const response = await fetch(`${envUrl}/rest/v1/`, {
+        method: 'GET',
         headers: {
           apikey: envKey
         }
       });
-      
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`Server returned HTTP status ${response.status} ${response.statusText}`);
+
+      console.log(`[Diagnostic Startup] HTTP REST response code: ${response.status}`);
+
+      if (response.status === 200) {
+        initialCheckpoints[2].status = 'success';
+        initialCheckpoints[2].description = 'Server Status: ✅ Connected (HTTP 200)';
+      } else if (response.status === 401) {
+        // 401 means server is reachable, network works, but credential format is rejected for root path.
+        initialCheckpoints[2].status = 'success'; // Safe success as it is reachable!
+        initialCheckpoints[2].description = 'Server Status: ✅ Reachable / Authentication Checkpoint (HTTP 401)';
+      } else if (response.status === 403) {
+        initialCheckpoints[2].status = 'failed';
+        initialCheckpoints[2].errorDetail = 'Permission Denied: Server responded with HTTP 403 Forbidden. Check your anon key credentials.';
+        connErrorDetail = 'HTTP 403 Forbidden';
+      } else if (response.status === 404) {
+        initialCheckpoints[2].status = 'failed';
+        initialCheckpoints[2].errorDetail = 'Endpoint Issue: Server returned HTTP 404 Not Found. Check if the URL is correct.';
+        connErrorDetail = 'HTTP 404 Not Found';
+      } else if (response.status >= 500) {
+        initialCheckpoints[2].status = 'failed';
+        initialCheckpoints[2].errorDetail = `Server Error: Database server returned HTTP ${response.status}. Instance might be restarting or paused.`;
+        connErrorDetail = `HTTP ${response.status} Server Error`;
+      } else {
+        initialCheckpoints[2].status = 'failed';
+        initialCheckpoints[2].errorDetail = `Unexpected Server Code: HTTP ${response.status}.`;
+        connErrorDetail = `HTTP ${response.status}`;
       }
-      initialCheckpoints[2].status = 'success';
-      setCheckpoints([...initialCheckpoints]);
     } catch (err: any) {
-      console.error('[Diagnostic Startup] Server Connection failed:', err);
+      console.error('[Diagnostic Startup] Connection test failed with network/CORS error:', err);
       initialCheckpoints[2].status = 'failed';
-      initialCheckpoints[2].errorDetail = err.message || 'Supabase API is completely unreachable. Potential network failure or incorrect URL.';
-      setCheckpoints([...initialCheckpoints]);
-      setHasFailed(true);
-      setLoading(false);
+      initialCheckpoints[2].errorDetail = err.message || 'Connection Failed: Network offline or host unreachable.';
+      connErrorDetail = 'Network Offline / DNS Unreachable';
+    }
+
+    if (initialCheckpoints[2].status === 'failed') {
+      setBannerMessage(`Supabase connection error (${connErrorDetail}). Real-time Sync and Cloud DB are currently offline.`);
+      setShowBanner(true);
+      setIsRetrying(false);
       return;
     }
 
-    // 4. Database Access (Tables) Check
+    // 4. Database Access Check (Official client database ping)
     try {
-      console.log('[Diagnostic Startup] Checking database access on base table (hotels)...');
-      // Query zero rows to check table existence/accessibility
-      const { error } = await supabase.from('hotels').select('id').limit(0);
+      console.log('[Diagnostic Startup] Pinging database hotels table via official client...');
+      const { error } = await supabase.from('hotels').select('id').limit(1);
       
       if (error) {
         if (error.code === '42P01') {
-          throw new Error('Relation "hotels" does not exist. Migrations have not been run on this Supabase project.');
+          throw new Error('Database relation "hotels" does not exist. Your cloud database is online, but Supabase tables have not been provisioned.');
         } else {
-          throw new Error(`Database error [${error.code}]: ${error.message}`);
+          throw new Error(`Database access denied [${error.code}]: ${error.message}`);
         }
       }
       
       initialCheckpoints[3].status = 'success';
-      setCheckpoints([...initialCheckpoints]);
     } catch (err: any) {
-      console.error('[Diagnostic Startup] Database Access failed:', err);
-      initialCheckpoints[3].status = 'failed';
-      initialCheckpoints[3].errorDetail = err.message || 'Postgres table validation failed.';
-      setCheckpoints([...initialCheckpoints]);
-      setHasFailed(true);
-      setLoading(false);
+      console.error('[Diagnostic Startup] Database access query failed:', err);
+      setBannerMessage('Database schema verification failed. Cloud tables are missing or RLS blocks query.');
+      setShowBanner(true);
+      setIsRetrying(false);
       return;
     }
 
-    // 5. Auth Gate Check
+    // 5. Auth Gate Check (Official client Auth session ping)
     try {
-      console.log('[Diagnostic Startup] Querying Auth Gateway session...');
+      console.log('[Diagnostic Startup] Querying Auth endpoint via client...');
       const { error } = await supabase.auth.getSession();
       if (error) throw error;
       
       initialCheckpoints[4].status = 'success';
-      setCheckpoints([...initialCheckpoints]);
-      console.log('[Diagnostic Startup] All diagnostics successfully passed.');
+      console.log('[Diagnostic Startup] All background diagnostic health checks passed successfully.');
+      setShowBanner(false); // Clear banner if connection fully restores
     } catch (err: any) {
-      console.error('[Diagnostic Startup] Auth check failed:', err);
-      initialCheckpoints[4].status = 'failed';
-      initialCheckpoints[4].errorDetail = err.message || 'Supabase Auth endpoint is failing or misconfigured.';
-      setCheckpoints([...initialCheckpoints]);
-      setHasFailed(true);
-      setLoading(false);
+      console.error('[Diagnostic Startup] Auth Gateway check failed:', err);
+      setBannerMessage('Supabase authentication gateway is currently offline or unreachable.');
+      setShowBanner(true);
+      setIsRetrying(false);
       return;
     }
 
-    setLoading(false);
+    setIsRetrying(false);
   };
 
   useEffect(() => {
-    runDiagnostics();
+    if (isConfigured) {
+      runBackgroundDiagnostics();
+    }
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen min-h-svh bg-slate-950 text-slate-400 gap-3 select-none">
-        <div className="w-10 h-10 rounded-full border-4 border-slate-900 border-t-amber-500 animate-spin" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">
-          Auditing Production Readiness...
-        </span>
-      </div>
-    );
-  }
-
-  if (hasFailed) {
-    const isEnvMissing = checkpoints[0].status === 'failed' || checkpoints[1].status === 'failed';
-
+  // Blocking Flow: ONLY active when VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing entirely.
+  if (isBlocking) {
     return (
       <div className="min-h-screen min-h-svh bg-slate-950 text-slate-100 flex flex-col justify-center items-center px-6 py-12 select-none animate-in fade-in duration-200 text-left">
         <div className="w-full max-w-xl space-y-6">
           
           {/* Header */}
           <div className="flex items-center gap-3 border-b border-slate-900 pb-5">
-            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-2xl animate-pulse">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl animate-pulse">
               <ShieldAlert className="w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-xl font-black text-white uppercase tracking-wider">Configuration Alert</h1>
+              <h1 className="text-xl font-black text-white uppercase tracking-wider">Configuration Missing</h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                {isEnvMissing 
-                  ? 'Supabase environment variables are missing.' 
-                  : 'QuickBite POS database connectivity check failed.'}
+                QuickBite POS requires Supabase credentials to bootstrap.
               </p>
             </div>
           </div>
 
-          {/* Diagnostic checkpoints cards */}
-          <div className="grid grid-cols-1 gap-3">
-            {checkpoints.map((cp) => {
-              const Icon = cp.id === 'supabase_url' || cp.id === 'supabase_key' ? Key : cp.id === 'supabase_connection' ? Server : cp.id === 'database_access' ? Database : Lock;
-              
-              return (
-                <div 
-                  key={cp.id} 
-                  className={`p-4 bg-slate-900 border rounded-2xl flex flex-col gap-2 transition-all ${
-                    cp.status === 'failed' 
-                      ? 'border-rose-500/30 bg-rose-500/[0.01]' 
-                      : cp.status === 'success'
-                      ? 'border-slate-800/80 bg-slate-900/50'
-                      : 'border-slate-950 opacity-40'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2.5">
-                      <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
-                        cp.status === 'failed' ? 'bg-rose-500/10 text-rose-450' : cp.status === 'success' ? 'bg-emerald-500/10 text-emerald-450' : 'bg-slate-950 text-slate-600'
-                      }`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h3 className="text-xs font-black uppercase tracking-wide text-white">
-                          {cp.name}
-                        </h3>
-                        <p className="text-[10px] text-slate-500 font-medium mt-0.5">
-                          {cp.description}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-1.5 shrink-0 select-none">
-                      {cp.status === 'failed' ? (
-                        <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-rose-400 bg-rose-950/20 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
-                          <XCircle className="w-3 h-3 text-rose-500" />
-                          <span>Missing / Failed</span>
-                        </span>
-                      ) : cp.status === 'success' ? (
-                        <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                          <span>Present / OK</span>
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-950 text-slate-650">
-                          Pending
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {cp.status === 'failed' && (
-                    <div className="text-[11px] space-y-2.5 border-t border-slate-850 pt-3 mt-1.5">
-                      <p className="text-rose-400 font-bold flex items-start gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-500" />
-                        <span>{cp.errorDetail}</span>
-                      </p>
-                      
-                      <div className="p-3 bg-slate-950 border border-slate-850 rounded-xl space-y-1 text-slate-400">
-                        <strong className="text-[9px] font-black uppercase text-amber-500 tracking-wider block">Resolution Action:</strong>
-                        <p className="leading-relaxed font-semibold">{cp.resolution}</p>
-                      </div>
-                    </div>
-                  )}
+          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+            <h2 className="text-sm font-bold text-white uppercase tracking-wide">
+              Supabase credentials not found at runtime
+            </h2>
+            <p className="text-xs text-slate-450 leading-relaxed font-semibold">
+              The application could not detect your database credentials. Please declare these key parameters inside your Vercel deployment variables or in your local <code className="text-amber-500">.env</code> configuration file.
+            </p>
+            
+            <div className="grid grid-cols-1 gap-2.5 pt-2">
+              <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-850">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-rose-500" />
+                  <span className="font-mono text-[10px] text-slate-400">VITE_SUPABASE_URL</span>
                 </div>
-              );
-            })}
+                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-rose-400 bg-rose-950/20 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
+                  <XCircle className="w-3 h-3 text-rose-500" />
+                  <span>Missing</span>
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-850">
+                <div className="flex items-center gap-2">
+                  <Key className="w-4 h-4 text-rose-500" />
+                  <span className="font-mono text-[10px] text-slate-400">VITE_SUPABASE_ANON_KEY</span>
+                </div>
+                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider text-rose-400 bg-rose-950/20 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
+                  <XCircle className="w-3 h-3 text-rose-500" />
+                  <span>Missing</span>
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Vercel Guide Notification Card */}
-          {isEnvMissing && (
-            <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-              <div className="flex gap-2 text-amber-500 font-black text-xs uppercase tracking-wider items-center">
-                <FileText className="w-4 h-4" />
-                <span>Vercel Deployment Guide</span>
-              </div>
-              <p className="text-[10px] text-slate-400 leading-normal font-semibold">
-                To fix the blank screen on your Vercel URL, you need to configure environment variables.
-              </p>
-              
-              <div className="space-y-1.5 p-3 bg-slate-950 border border-slate-850 rounded-xl font-mono text-[9px] text-slate-350">
-                <div>1. Go to <strong className="text-white">Vercel Dashboard</strong> &rarr; Select your project</div>
-                <div>2. Navigate to <strong className="text-white">Settings</strong> &rarr; <strong className="text-white">Environment Variables</strong></div>
-                <div>3. Add variables with the exact values from Supabase:</div>
-                <div className="pl-4 pt-1 text-amber-500 font-bold">VITE_SUPABASE_URL = (your supabase url)</div>
-                <div className="pl-4 text-amber-500 font-bold">VITE_SUPABASE_ANON_KEY = (your supabase anon key)</div>
-                <div className="pt-1 text-slate-500">4. Redeploy your application in Vercel.</div>
-              </div>
+          {/* Vercel Setup Instruction Card */}
+          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+            <div className="flex gap-2 text-amber-500 font-black text-xs uppercase tracking-wider items-center">
+              <Key className="w-4 h-4 text-amber-500" />
+              <span>Vercel Environment Setup</span>
             </div>
-          )}
-
-          {/* Special migration notification if database is missing tables */}
-          {!isEnvMissing && checkpoints[3]?.status === 'failed' && (
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-              <div className="flex gap-2 text-amber-500 font-black text-xs uppercase tracking-wider items-center">
-                <Database className="w-4 h-4" />
-                <span>SQL Database Setup Required</span>
-              </div>
-              <p className="text-[10px] text-slate-400 leading-normal font-semibold">
-                You must execute the <code className="text-amber-500">supabase_schema.sql</code> script on your Supabase dashboard to set up hotel registries, sequences, and secure RLS policies.
-              </p>
-              
-              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-850 text-slate-600 text-[10px] font-semibold flex justify-center gap-1.5 items-center">
-                <FileText className="w-4 h-4 text-slate-500" />
-                <span>Run migrations or copy schema script from your supabase_schema.sql file.</span>
-              </div>
+            
+            <div className="space-y-1.5 p-3.5 bg-slate-950 border border-slate-850 rounded-xl font-mono text-[10px] text-slate-350 leading-relaxed font-semibold">
+              <div>1. Go to <strong className="text-white">Vercel Dashboard</strong> &rarr; Select your project</div>
+              <div>2. Navigate to <strong className="text-white">Settings</strong> &rarr; <strong className="text-white">Environment Variables</strong></div>
+              <div>3. Create two new variables:</div>
+              <div className="pl-4 pt-1 text-amber-500 font-bold">VITE_SUPABASE_URL = (your URL)</div>
+              <div className="pl-4 text-amber-500 font-bold">VITE_SUPABASE_ANON_KEY = (your public anon key)</div>
+              <div className="pt-1.5 text-slate-500 font-bold">4. Trigger a new deployment in Vercel to load changes.</div>
             </div>
-          )}
+          </div>
 
-          {/* Trigger buttons */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3">
             <button
-              onClick={runDiagnostics}
-              className="flex-1 h-12 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-slate-950 font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
+              onClick={() => {
+                const refreshedUrl = import.meta.env.VITE_SUPABASE_URL;
+                const refreshedKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+                if (refreshedUrl && refreshedKey && !refreshedUrl.includes('placeholder-url')) {
+                  setIsBlocking(false);
+                  window.location.reload();
+                } else {
+                  alert('Supabase credentials still missing in environment. Please redeploy Vercel or configure your local .env file.');
+                }
+              }}
+              className="flex-1 h-12 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-slate-950 font-bold transition-all flex items-center justify-center gap-2"
             >
-              <RefreshCw className="w-4 h-4" />
-              <span>Retry Diagnostic Checks</span>
+              <RefreshCw className="w-4 h-4 animate-spin-reverse" />
+              <span>Re-check Environment Configuration</span>
             </button>
           </div>
 
@@ -327,5 +288,46 @@ export const StartupHealthCheck: React.FC<StartupHealthCheckProps> = ({ children
     );
   }
 
-  return <>{children}</>;
+  // Non-blocking Flow: Render the router children immediately. Render a sticky warning banner at top if background diagnostic fails.
+  return (
+    <>
+      {showBanner && (
+        <div className="fixed top-0 inset-x-0 z-[9999] bg-rose-600 text-white shadow-xl select-none animate-in slide-in-from-top duration-300 font-semibold text-xs py-2.5 px-4 flex items-center justify-between gap-3 border-b border-rose-700/50">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-white animate-pulse" />
+            <span className="font-bold tracking-wide">
+              {bannerMessage}
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-3.5 shrink-0">
+            <button 
+              onClick={runBackgroundDiagnostics}
+              disabled={isRetrying}
+              className="px-3 py-1 bg-white/10 hover:bg-white/20 active:scale-95 disabled:opacity-50 text-[10px] uppercase font-black tracking-wider rounded-lg transition-all border border-white/20 flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
+              <span>{isRetrying ? 'Retrying...' : 'Retry Connection'}</span>
+            </button>
+            
+            <a 
+              href="/diagnostics"
+              className="px-3 py-1 bg-rose-950/40 hover:bg-rose-950/60 text-[10px] uppercase font-black tracking-wider rounded-lg transition-all border border-rose-950/20 flex items-center gap-1"
+            >
+              <span>Audit Panel</span>
+              <ArrowRight className="w-3 h-3" />
+            </a>
+
+            <button 
+              onClick={() => setShowBanner(false)}
+              className="p-1 hover:bg-white/10 rounded-lg transition-all text-white/80 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      {children}
+    </>
+  );
 };
