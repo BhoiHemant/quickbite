@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #020617; /* Slate 950 */
+  color: #f8fafc; /* Slate 50 */
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow-x: hidden;
+  user-select: none; /* Prevent accidental text selections during fast tapping */
+}
+
+/* Chrome, Safari and Opera - hide scrollbars for horizontal lists */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* IE, Edge and Firefox - hide scrollbars for horizontal lists */
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Ensure #root fills screen cleanly */
+#root {
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Active buttons styling for tactile feedback on low-end androids */
+.active-tap:active {
+  transform: scale(0.96);
+  opacity: 0.9;
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+/* Custom thermal receipt print styling */
+@media print {
+  body {
+    background-color: white;
+    color: black;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-container {
+    width: 100%;
+    max-width: 80mm; /* Standard receipt size */
+    margin: 0 auto;
+    padding: 10px;
+    box-sizing: border-box;
+  }
+  
+  .print-divider {
+    border-top: 1px dashed black;
+    margin: 8px 0;
+  }
+  
+  .print-text-right {
+    text-align: right;
+  }
+  
+  .print-text-center {
+    text-align: center;
+  }
+  
+  .print-bold {
+    font-weight: bold;
+  }
+}
